@@ -38,6 +38,9 @@ ENCODING_SIZE_NAMES = [
 # A rectangle
 Rect = namedtuple('Rect', 'left top width height')
 
+# A polygon
+Polygon = namedtuple('Polygon', 'p0 p1 p2 p3')
+
 # Results of reading a barcode
 Decoded = namedtuple('Decoded', 'data rect')
 
@@ -146,7 +149,7 @@ def _decoded_matrix_region(decoder, region, corrections):
             dmtxMessageDestroy(byref(message))
 
 
-def _decode_region(decoder, region, corrections, shrink):
+def _decode_region(decoder, region, corrections, shrink, return_polygon=False):
     """Decodes and returns the value in a region.
 
     Args:
@@ -160,18 +163,39 @@ def _decode_region(decoder, region, corrections, shrink):
             # Coordinates
             p00 = DmtxVector2()
             p11 = DmtxVector2(1.0, 1.0)
-            dmtxMatrix3VMultiplyBy(
-                p00,
-                region.contents.fit2raw
-            )
+            p10 = DmtxVector2(1.0, 0.0)
+            p01 = DmtxVector2(0.0, 1.0)
+            
+            dmtxMatrix3VMultiplyBy(p00, region.contents.fit2raw)
             dmtxMatrix3VMultiplyBy(p11, region.contents.fit2raw)
-            x0 = int((shrink * p00.X) + 0.5)
-            y0 = int((shrink * p00.Y) + 0.5)
-            x1 = int((shrink * p11.X) + 0.5)
-            y1 = int((shrink * p11.Y) + 0.5)
+            dmtxMatrix3VMultiplyBy(p10, region.contents.fit2raw)
+            dmtxMatrix3VMultiplyBy(p01, region.contents.fit2raw)
+            
+            x00 = int((shrink * p00.X) + 0.5)
+            y00 = int((shrink * p00.Y) + 0.5)
+            x11 = int((shrink * p11.X) + 0.5)
+            y11 = int((shrink * p11.Y) + 0.5)
+            x10 = int((shrink * p10.X) + 0.5)
+            y10 = int((shrink * p10.Y) + 0.5)
+            x01 = int((shrink * p01.X) + 0.5)
+            y01 = int((shrink * p01.Y) + 0.5)
+            
+            if return_polygon:
+                p0 = [x00, y00]
+                p1 = [x10, y10]
+                p2 = [x11, y11]
+                p3 = [x01, y01]
+                shape = Polygon(p0, p1, p2, p3)
+            else:
+                x0 = min(x00, x11, x10, x01)
+                y0 = min(y00, y11, y10, y01)
+                x1 = max(x00, x11, x10, x01)
+                y1 = max(y00, y11, y10, y01)
+                shape = Rect(x0, y0, x1 - x0, y1 - y0)
+            
             return Decoded(
                 string_at(msg.contents.output),
-                Rect(x0, y0, x1 - x0, y1 - y0)
+                shape
             )
         else:
             return None
@@ -229,7 +253,7 @@ def _pixel_data(image):
 
 def decode(image, timeout=None, gap_size=None, shrink=1, shape=None,
            deviation=None, threshold=None, min_edge=None, max_edge=None,
-           corrections=None, max_count=None):
+           corrections=None, max_count=None, return_polygon=False):
     """Decodes datamatrix barcodes in `image`.
 
     Args:
@@ -289,7 +313,7 @@ def decode(image, timeout=None, gap_size=None, shrink=1, shape=None,
                     else:
                         # Decoded
                         res = _decode_region(
-                            decoder, region, corrections, shrink
+                            decoder, region, corrections, shrink, return_polygon
                         )
                         if res:
                             results.append(res)
